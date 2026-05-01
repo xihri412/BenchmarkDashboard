@@ -1,8 +1,8 @@
 # Running BenchmarkDashboard
 
 This project is local-first. Use the macOS flow below for local development
-without Docker. The Docker files are present only as future Linux deployment
-scaffolding.
+without Docker. For a Linux machine with conda and Docker, use the backend-first
+Linux flow.
 
 ## Local macOS Setup Without Docker
 
@@ -125,6 +125,72 @@ npm run dev
 The Vite app runs at `http://localhost:5173` and calls the API at
 `http://localhost:8000` by default.
 
+## Linux Backend Setup With Conda And Docker
+
+This is the recommended path for a Linux host where the backend is the main
+service and conda + Docker are already available.
+
+From the repository root:
+
+```bash
+bash scripts/start-linux-backend.sh
+```
+
+The script does the backend-heavy work:
+
+1. creates `backend/.env` from `backend/.env.example` if needed,
+2. starts a PostgreSQL 16 Docker container on `localhost:5432`,
+3. creates or reuses a conda environment named `benchmark-dashboard`,
+4. installs `backend/requirements.txt`,
+5. runs `alembic upgrade head`,
+6. imports data from `data/`,
+7. starts FastAPI on `0.0.0.0:8000`.
+
+### Linux Script Settings
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CONDA_ENV_NAME` | `benchmark-dashboard` | Conda environment to create or reuse. |
+| `PYTHON_VERSION` | `3.12` | Python version for a newly created conda environment. |
+| `START_POSTGRES_DOCKER` | `1` | Start/manage PostgreSQL through Docker. Set `0` to use an existing database. |
+| `POSTGRES_CONTAINER` | `benchmark-dashboard-postgres` | Docker container name. |
+| `POSTGRES_PORT` | `5432` | Host port mapped to PostgreSQL. |
+| `POSTGRES_DB` | `benchmark_dashboard` | Database name. |
+| `POSTGRES_USER` | `postgres` | Database user. |
+| `POSTGRES_PASSWORD` | `postgres` | Database password. Change this on shared machines. |
+| `DATA_DIR` | `<repo>/data` | Raw benchmark JSONL input directory. |
+| `BACKEND_HOST` | `0.0.0.0` | FastAPI listen address. |
+| `BACKEND_PORT` | `8000` | FastAPI listen port. |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Frontend origins allowed by FastAPI. |
+
+Examples:
+
+```bash
+CONDA_ENV_NAME=benchdash BACKEND_PORT=8001 bash scripts/start-linux-backend.sh
+```
+
+Use an existing PostgreSQL instance instead of Docker:
+
+```bash
+START_POSTGRES_DOCKER=0 \
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/benchmark_dashboard \
+bash scripts/start-linux-backend.sh
+```
+
+Expose the backend to another machine on the same network:
+
+```bash
+CORS_ORIGINS=http://<linux-host-ip>:5173 \
+BACKEND_HOST=0.0.0.0 \
+bash scripts/start-linux-backend.sh
+```
+
+Then point the frontend at:
+
+```text
+VITE_API_BASE_URL=http://<linux-host-ip>:8000
+```
+
 ## Local Network Access
 
 To let another person open the dashboard from the same network, both the
@@ -158,10 +224,10 @@ Notes:
 - Your firewall must allow inbound traffic on the chosen frontend and backend
   ports.
 
-## Future Linux Docker Deployment
+## Full Docker Compose On Linux
 
-Docker is not required for local development. For a future Linux host with
-Docker and Docker Compose installed, the repository includes:
+Docker is not required for local development. For a Linux host with Docker and
+Docker Compose installed, the repository includes:
 
 - `backend/Dockerfile`: builds the FastAPI service image.
 - `frontend/Dockerfile`: builds the Vite static bundle and serves it with nginx.

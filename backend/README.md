@@ -131,3 +131,34 @@ uvicorn app.main:app --reload
 ```
 
 For deployment details, see `docs/running.md`.
+
+## Linux Backend Run With Conda
+
+For a Linux machine where the backend is the main workload and conda + Docker
+are available, run this from the repository root:
+
+```bash
+bash scripts/start-linux-backend.sh
+```
+
+Defaults:
+
+- conda environment: `benchmark-dashboard`
+- Python version: `3.12`
+- PostgreSQL: Docker container `benchmark-dashboard-postgres`
+- database URL: `postgresql+psycopg://postgres:postgres@localhost:5432/benchmark_dashboard`
+- backend bind address: `0.0.0.0:8000`
+
+Common overrides:
+
+```bash
+CONDA_ENV_NAME=benchdash BACKEND_PORT=8001 bash scripts/start-linux-backend.sh
+```
+
+If the Linux host already has PostgreSQL running, skip the Docker container:
+
+```bash
+START_POSTGRES_DOCKER=0 \
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/benchmark_dashboard \
+bash scripts/start-linux-backend.sh
+```

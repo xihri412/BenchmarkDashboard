@@ -34,6 +34,7 @@ The current implementation is local-machine friendly and does not require Docker
 | `docs/running.md` | Local and future Docker runbook. |
 | `data/` | Local raw benchmark results. This directory is ignored by Git and should not be uploaded unless explicitly intended. |
 | `docker-compose.yml` | Future Linux Docker deployment scaffold for frontend, backend, and PostgreSQL. |
+| `scripts/start-linux-backend.sh` | Linux backend bootstrap using conda for Python and Docker for PostgreSQL. |
 | `.gitignore` | Keeps `data/`, `.env`, virtualenvs, build outputs, and dependency folders out of Git. |
 
 ## Data Contract
@@ -176,6 +177,39 @@ CORS_ORIGINS=http://192.168.1.20:5173
 ```
 
 For production, prefer a stable domain and HTTPS instead of a raw IP.
+
+### Linux backend with conda and Docker
+
+On a Linux machine that has conda and Docker, use the backend-focused script:
+
+```bash
+bash scripts/start-linux-backend.sh
+```
+
+The script will:
+
+- create `backend/.env` from `backend/.env.example` if needed
+- start a PostgreSQL 16 Docker container unless one is already running
+- create or reuse a conda environment named `benchmark-dashboard`
+- install backend Python dependencies
+- run Alembic migrations
+- import JSONL data from `data/`
+- start FastAPI on `http://0.0.0.0:8000`
+
+Useful overrides:
+
+```bash
+CONDA_ENV_NAME=benchdash BACKEND_PORT=8001 bash scripts/start-linux-backend.sh
+```
+
+If PostgreSQL is already available outside Docker, skip the container startup and
+provide your database URL:
+
+```bash
+START_POSTGRES_DOCKER=0 \
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/benchmark_dashboard \
+bash scripts/start-linux-backend.sh
+```
 
 ### 1. PostgreSQL
 
