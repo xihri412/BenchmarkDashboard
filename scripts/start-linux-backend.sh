@@ -97,7 +97,7 @@ fi
 
 export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB}"
 export DATA_DIR="$DATA_DIR"
-export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}"
+export CORS_ORIGINS="${CORS_ORIGINS:-[\"http://localhost:5173\",\"http://127.0.0.1:5173\"]}"
 
 prepare_conda
 

@@ -34,7 +34,8 @@ The current implementation is local-machine friendly and does not require Docker
 | `docs/running.md` | Local and future Docker runbook. |
 | `data/` | Local raw benchmark results. This directory is ignored by Git and should not be uploaded unless explicitly intended. |
 | `docker-compose.yml` | Future Linux Docker deployment scaffold for frontend, backend, and PostgreSQL. |
-| `scripts/start-linux-backend.sh` | Linux backend bootstrap using conda for Python and Docker for PostgreSQL. |
+| `scripts/start-linux.sh` | Linux full-stack bootstrap: starts backend, PostgreSQL, and frontend. |
+| `scripts/start-linux-backend.sh` | Linux backend-only bootstrap using conda for Python and Docker for PostgreSQL. |
 | `.gitignore` | Keeps `data/`, `.env`, virtualenvs, build outputs, and dependency folders out of Git. |
 
 ## Data Contract
@@ -178,9 +179,43 @@ CORS_ORIGINS=http://192.168.1.20:5173
 
 For production, prefer a stable domain and HTTPS instead of a raw IP.
 
-### Linux backend with conda and Docker
+### Linux full-stack start with conda and Docker
 
-On a Linux machine that has conda and Docker, use the backend-focused script:
+On a Linux machine that has conda, Docker, Node.js, and npm, use:
+
+```bash
+bash scripts/start-linux.sh
+```
+
+This starts PostgreSQL through Docker, starts the FastAPI backend through conda,
+then starts the React frontend with Vite. By default:
+
+- backend listens on `0.0.0.0:8000`
+- frontend listens on `0.0.0.0:5173`
+- browser URL is `http://localhost:5173`
+- frontend calls `http://localhost:8000`
+
+For access from another machine, pass the Linux host IP or domain:
+
+```bash
+PUBLIC_HOST=192.168.1.50 bash scripts/start-linux.sh
+```
+
+Then open:
+
+```text
+http://192.168.1.50:5173
+```
+
+Useful overrides:
+
+```bash
+PUBLIC_HOST=192.168.1.50 BACKEND_PORT=8001 FRONTEND_PORT=5174 bash scripts/start-linux.sh
+```
+
+### Linux backend only with conda and Docker
+
+If you only want the API service and database, use the backend-focused script:
 
 ```bash
 bash scripts/start-linux-backend.sh
@@ -195,6 +230,9 @@ The script will:
 - run Alembic migrations
 - import JSONL data from `data/`
 - start FastAPI on `http://0.0.0.0:8000`
+
+It does not start the frontend. Use `scripts/start-linux.sh` when you want both
+backend and frontend.
 
 Useful overrides:
 

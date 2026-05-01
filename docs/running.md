@@ -125,31 +125,72 @@ npm run dev
 The Vite app runs at `http://localhost:5173` and calls the API at
 `http://localhost:8000` by default.
 
-## Linux Backend Setup With Conda And Docker
+## Linux Full-stack Setup With Conda And Docker
 
-This is the recommended path for a Linux host where the backend is the main
-service and conda + Docker are already available.
+This is the recommended non-compose path for a Linux host where conda, Docker,
+Node.js, and npm are already available.
 
 From the repository root:
+
+```bash
+bash scripts/start-linux.sh
+```
+
+The script starts the whole app:
+
+1. starts `scripts/start-linux-backend.sh` in the background,
+2. creates `backend/.env` from `backend/.env.example` if needed,
+3. starts a PostgreSQL 16 Docker container on `localhost:5432`,
+4. creates or reuses a conda environment named `benchmark-dashboard`,
+5. installs `backend/requirements.txt`,
+6. runs `alembic upgrade head`,
+7. imports data from `data/`,
+8. starts FastAPI on `0.0.0.0:8000`,
+9. installs frontend npm dependencies,
+10. starts Vite on `0.0.0.0:5173`.
+
+For access from another machine, pass the host IP or domain:
+
+```bash
+PUBLIC_HOST=<linux-host-ip> bash scripts/start-linux.sh
+```
+
+Then open:
+
+```text
+http://<linux-host-ip>:5173
+```
+
+The `PUBLIC_HOST` value is used to derive:
+
+```text
+VITE_API_BASE_URL=http://<linux-host-ip>:8000
+CORS_ORIGINS=http://<linux-host-ip>:5173,http://localhost:5173,http://127.0.0.1:5173
+```
+
+You can override them directly when needed:
+
+```bash
+PUBLIC_HOST=<linux-host-ip> \
+VITE_API_BASE_URL=http://<linux-host-ip>:8000 \
+CORS_ORIGINS=http://<linux-host-ip>:5173 \
+bash scripts/start-linux.sh
+```
+
+## Linux Backend-only Setup With Conda And Docker
+
+Use the backend-only script when you intentionally do not want to start the
+frontend:
 
 ```bash
 bash scripts/start-linux-backend.sh
 ```
 
-The script does the backend-heavy work:
-
-1. creates `backend/.env` from `backend/.env.example` if needed,
-2. starts a PostgreSQL 16 Docker container on `localhost:5432`,
-3. creates or reuses a conda environment named `benchmark-dashboard`,
-4. installs `backend/requirements.txt`,
-5. runs `alembic upgrade head`,
-6. imports data from `data/`,
-7. starts FastAPI on `0.0.0.0:8000`.
-
 ### Linux Script Settings
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `PUBLIC_HOST` | `localhost` | Hostname/IP users put in the browser for the frontend and API. Used by `start-linux.sh`. |
 | `CONDA_ENV_NAME` | `benchmark-dashboard` | Conda environment to create or reuse. |
 | `PYTHON_VERSION` | `3.12` | Python version for a newly created conda environment. |
 | `START_POSTGRES_DOCKER` | `1` | Start/manage PostgreSQL through Docker. Set `0` to use an existing database. |
@@ -161,12 +202,15 @@ The script does the backend-heavy work:
 | `DATA_DIR` | `<repo>/data` | Raw benchmark JSONL input directory. |
 | `BACKEND_HOST` | `0.0.0.0` | FastAPI listen address. |
 | `BACKEND_PORT` | `8000` | FastAPI listen port. |
+| `FRONTEND_HOST` | `0.0.0.0` | Vite listen address. Used by `start-linux.sh`. |
+| `FRONTEND_PORT` | `5173` | Vite listen port. Used by `start-linux.sh`. |
+| `VITE_API_BASE_URL` | `http://$PUBLIC_HOST:$BACKEND_PORT` | API URL baked into the dev frontend. Used by `start-linux.sh`. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Frontend origins allowed by FastAPI. |
 
 Examples:
 
 ```bash
-CONDA_ENV_NAME=benchdash BACKEND_PORT=8001 bash scripts/start-linux-backend.sh
+PUBLIC_HOST=192.168.1.50 CONDA_ENV_NAME=benchdash BACKEND_PORT=8001 FRONTEND_PORT=5174 bash scripts/start-linux.sh
 ```
 
 Use an existing PostgreSQL instance instead of Docker:
@@ -174,7 +218,7 @@ Use an existing PostgreSQL instance instead of Docker:
 ```bash
 START_POSTGRES_DOCKER=0 \
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/benchmark_dashboard \
-bash scripts/start-linux-backend.sh
+bash scripts/start-linux.sh
 ```
 
 Expose the backend to another machine on the same network:

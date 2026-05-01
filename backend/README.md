@@ -141,6 +141,13 @@ are available, run this from the repository root:
 bash scripts/start-linux-backend.sh
 ```
 
+This script is backend-only. It does not start the React frontend. To start both
+backend and frontend on Linux, run:
+
+```bash
+bash scripts/start-linux.sh
+```
+
 Defaults:
 
 - conda environment: `benchmark-dashboard`
