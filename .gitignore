@@ -1,0 +1,33 @@
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+backend/.venv/
+.env
+backend/.env
+backend/*.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+*.tsbuildinfo
+
+# Build/log output
+*.log
+
+# Benchmark source data stays local or on the deployment host.
+data/
+
+# Local database volumes
+postgres-data/
+postgres/
+pgdata/
