@@ -95,10 +95,7 @@ class EvaluationRun(Base):
 
 class Record(Base):
     __tablename__ = "records"
-    __table_args__ = (
-        UniqueConstraint("run_id", "item_id", name="uq_records_run_item"),
-        Index("ix_records_model_dataset", "model_id", "dataset_id"),
-    )
+    __table_args__ = (Index("ix_records_model_dataset", "model_id", "dataset_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[int] = mapped_column(

@@ -1,4 +1,5 @@
 from functools import lru_cache
+import json
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,14 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors_origins(cls, value: Any) -> list[str] | Any:
         if isinstance(value, str):
+            stripped_value = value.strip()
+            if stripped_value.startswith("["):
+                try:
+                    parsed_value = json.loads(stripped_value)
+                except json.JSONDecodeError:
+                    parsed_value = None
+                if isinstance(parsed_value, list):
+                    return [str(origin).strip() for origin in parsed_value if str(origin).strip()]
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
