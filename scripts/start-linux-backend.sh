@@ -11,6 +11,7 @@ CONDA_ENV_NAME="${CONDA_ENV_NAME:-benchmark-dashboard}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+BACKEND_RELOAD="${BACKEND_RELOAD:-1}"
 
 START_POSTGRES_DOCKER="${START_POSTGRES_DOCKER:-1}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-benchmark-dashboard-postgres}"
@@ -117,4 +118,8 @@ else
 fi
 
 log "Starting backend on http://$BACKEND_HOST:$BACKEND_PORT"
+if [[ "$BACKEND_RELOAD" == "1" ]]; then
+  exec uvicorn app.main:app --reload --host "$BACKEND_HOST" --port "$BACKEND_PORT"
+fi
+
 exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT"
