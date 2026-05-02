@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -50,6 +51,7 @@ def _get_grouped_matrix(
     latest_rows = db.execute(
         select(latest_metrics).where(latest_metrics.c.row_number == 1)
     ).all()
+    latest_rows = _filter_existing_source_rows(latest_rows)
     dataset_name_by_id = {dataset.id: dataset.name for dataset in datasets}
     values_by_model_dataset = {
         (row.model_id, dataset_name_by_id[row.dataset_id]): getattr(row, metric)
@@ -61,6 +63,9 @@ def _get_grouped_matrix(
     for row in latest_rows:
         if row.dataset_id in dataset_name_by_id:
             rows_by_model_id.setdefault(row.model_id, []).append(row)
+    models_with_metrics = [
+        model for model in models if model.id in rows_by_model_id
+    ]
 
     groups = _build_metric_groups(datasets, selected_dataset_keys)
     dataset_names = [
@@ -69,7 +74,7 @@ def _get_grouped_matrix(
         for column in group["columns"]
         if column["type"] == "dataset"
     ]
-    model_names = [model.name for model in models]
+    model_names = [model.name for model in models_with_metrics]
     rows = [
         {
             "model": model.name,
@@ -82,7 +87,7 @@ def _get_grouped_matrix(
                 values_by_model_dataset,
             ),
         }
-        for model in models
+        for model in models_with_metrics
     ]
 
     return {
@@ -246,6 +251,7 @@ def get_overall_metrics(
     latest_rows = db.execute(
         select(latest_metrics).where(latest_metrics.c.row_number == 1)
     ).all()
+    latest_rows = _filter_existing_source_rows(latest_rows)
 
     rows_by_model_id: dict[int, list[Any]] = {}
     for row in latest_rows:
@@ -254,6 +260,8 @@ def get_overall_metrics(
     rows: list[dict[str, object]] = []
     for model in models:
         model_rows = rows_by_model_id.get(model.id, [])
+        if not model_rows:
+            continue
         total_count = sum(row.total_count for row in model_rows)
         correct_count = sum(row.correct_count for row in model_rows)
         rows.append(
@@ -292,6 +300,7 @@ def _latest_metrics_subquery() -> Any:
             MetricsSummary.avg_inference_time.label("avg_inference_time"),
             MetricsSummary.total_count.label("total_count"),
             MetricsSummary.correct_count.label("correct_count"),
+            EvaluationRun.source_path.label("source_path"),
             func.row_number()
             .over(
                 partition_by=(MetricsSummary.model_id, MetricsSummary.dataset_id),
@@ -303,6 +312,14 @@ def _latest_metrics_subquery() -> Any:
         .where(EvaluationRun.status.in_(SUCCESSFUL_RUN_STATUSES))
         .subquery()
     )
+
+
+def _filter_existing_source_rows(rows: list[Any]) -> list[Any]:
+    return [
+        row
+        for row in rows
+        if row.source_path and Path(row.source_path).expanduser().exists()
+    ]
 
 
 def _weighted_average(rows: list[Any], metric: str) -> float | None:
