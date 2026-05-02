@@ -93,6 +93,12 @@ python -m app.ingest --data-dir ../data
 The importer is idempotent for completed runs with the same source file hash, so
 running it again skips data that is already imported.
 
+Import is best-effort. A single bad dataset source is skipped with a warning and
+does not stop the backend or the rest of ingestion. When possible, a failed
+source is recorded as an `evaluation_runs.status = "failed"` row; failed runs do
+not contribute to metrics/search/compare. Check logs for the model, dataset,
+source path, and error, then fix the data or adapter and rerun ingestion.
+
 If you add a new dataset with a new field schema, add an adapter under
 `backend/app/adapters/`, register it in `backend/app/adapters/registry.py`, add
 it to `backend/app/dataset_categories.py`, and rerun ingestion. See

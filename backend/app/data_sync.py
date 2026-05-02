@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -13,6 +14,8 @@ from app.database import get_db
 from app.ingest import IGNORED_JSONL_FILENAMES, ingest_data_dir
 
 DataSnapshot = tuple[tuple[str, int, int], ...]
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _last_check = 0.0
@@ -34,12 +37,20 @@ def sync_data_if_needed(db: Session = Depends(get_db)) -> None:
         if now - _last_check < settings.data_refresh_interval_seconds:
             return
 
-        snapshot = _data_snapshot(settings.data_dir)
-        if snapshot != _last_snapshot:
-            ingest_data_dir(settings.data_dir, db)
-            _last_snapshot = snapshot
-
-        _last_check = now
+        try:
+            snapshot = _data_snapshot(settings.data_dir)
+            if snapshot != _last_snapshot:
+                ingest_data_dir(settings.data_dir, db)
+                _last_snapshot = snapshot
+        except Exception as exc:
+            db.rollback()
+            logger.warning(
+                "Auto data sync failed; serving existing database contents. error=%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+        finally:
+            _last_check = now
 
 
 def _data_snapshot(data_dir: Path) -> DataSnapshot:

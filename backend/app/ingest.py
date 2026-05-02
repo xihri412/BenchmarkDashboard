@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,8 @@ IGNORED_JSONL_FILENAMES = {
     "ifbench_score_old.jsonl",
 }
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class ImportResult:
@@ -31,6 +34,8 @@ class ImportResult:
     run_id: int | None = None
     total_count: int = 0
     correct_count: int = 0
+    error_type: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -52,7 +57,7 @@ def ingest_data_dir(data_dir: Path, db: Session) -> list[ImportResult]:
         if dataset_config is None:
             continue
 
-        result = ingest_source(
+        result = ingest_source_best_effort(
             db=db,
             source=source,
             dataset_config=dataset_config,
@@ -79,15 +84,46 @@ def ingest_file(
     return ingest_source(db=db, source=source, dataset_config=dataset_config)
 
 
-def ingest_source(
+def ingest_source_best_effort(
     *,
     db: Session,
     source: ImportSource,
     dataset_config: DatasetConfig,
 ) -> ImportResult:
     source_path = source.source_path.expanduser().resolve()
+    source_hash: str | None = None
+    try:
+        source_hash = _sha256_files(tuple(path.expanduser().resolve() for path in source.files))
+        result = ingest_source(
+            db=db,
+            source=source,
+            dataset_config=dataset_config,
+            source_hash=source_hash,
+        )
+        return result
+    except Exception as exc:
+        db.rollback()
+        _log_source_failure(source, exc)
+        return _record_failed_import(
+            db=db,
+            source=source,
+            dataset_config=dataset_config,
+            source_path=source_path,
+            source_hash=source_hash,
+            exc=exc,
+        )
+
+
+def ingest_source(
+    *,
+    db: Session,
+    source: ImportSource,
+    dataset_config: DatasetConfig,
+    source_hash: str | None = None,
+) -> ImportResult:
+    source_path = source.source_path.expanduser().resolve()
     source_files = tuple(path.expanduser().resolve() for path in source.files)
-    source_hash = _sha256_files(source_files)
+    source_hash = source_hash or _sha256_files(source_files)
 
     model = _get_or_create_model(db, source.model_name)
     dataset = _get_or_create_dataset(db, dataset_config)
@@ -172,6 +208,88 @@ def ingest_source(
         total_count=total_count,
         correct_count=correct_count,
     )
+
+
+def _record_failed_import(
+    *,
+    db: Session,
+    source: ImportSource,
+    dataset_config: DatasetConfig,
+    source_path: Path,
+    source_hash: str | None,
+    exc: Exception,
+) -> ImportResult:
+    error_type = type(exc).__name__
+    error_message = str(exc)
+    try:
+        model = _get_or_create_model(db, source.model_name)
+        dataset = _get_or_create_dataset(db, dataset_config)
+        failed_hash = source_hash or f"failed:{_source_identity_hash(source)}"
+        run = EvaluationRun(
+            model_id=model.id,
+            dataset_id=dataset.id,
+            source_path=str(source_path),
+            source_hash=failed_hash,
+            status="failed",
+            total_count=0,
+            correct_count=0,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return ImportResult(
+            model_name=model.name,
+            dataset_name=dataset.name,
+            source_path=source_path,
+            source_hash=failed_hash,
+            status="failed",
+            run_id=run.id,
+            error_type=error_type,
+            error_message=error_message,
+        )
+    except Exception as failed_run_exc:
+        db.rollback()
+        logger.warning(
+            "Could not record failed dataset run: model=%s dataset=%s source=%s "
+            "error=%s: %s original_error=%s: %s",
+            source.model_name,
+            dataset_config.name,
+            source_path,
+            type(failed_run_exc).__name__,
+            failed_run_exc,
+            error_type,
+            error_message,
+        )
+        return ImportResult(
+            model_name=source.model_name,
+            dataset_name=dataset_config.name,
+            source_path=source_path,
+            source_hash=source_hash or "",
+            status="failed",
+            error_type=error_type,
+            error_message=error_message,
+        )
+
+
+def _log_source_failure(source: ImportSource, exc: Exception) -> None:
+    logger.warning(
+        "Skipped dataset import: model=%s dataset=%s source=%s error=%s: %s",
+        source.model_name,
+        source.dataset_name,
+        source.source_path,
+        type(exc).__name__,
+        exc,
+    )
+
+
+def _source_identity_hash(source: ImportSource) -> str:
+    digest = hashlib.sha256()
+    digest.update(source.model_name.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(source.dataset_name.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(str(source.source_path).encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _ensure_datasets(db: Session) -> None:
@@ -479,6 +597,7 @@ def _sha256_files(paths: tuple[Path, ...]) -> str:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     parser = argparse.ArgumentParser(description="Import benchmark JSONL data.")
     parser.add_argument(
         "--data-dir",
@@ -488,8 +607,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    with SessionLocal() as db:
-        results = ingest_data_dir(args.data_dir, db)
+    try:
+        with SessionLocal() as db:
+            results = ingest_data_dir(args.data_dir, db)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}")
+        raise SystemExit(1) from exc
 
     for result in results:
         print(
@@ -497,6 +620,24 @@ def main() -> None:
             f"run_id={result.run_id} total={result.total_count} "
             f"correct={result.correct_count} hash={result.source_hash[:12]}"
         )
+    counts = {status: 0 for status in ("imported", "skipped", "failed")}
+    for result in results:
+        counts[result.status] = counts.get(result.status, 0) + 1
+    print(
+        "summary: "
+        f"imported={counts.get('imported', 0)} "
+        f"skipped={counts.get('skipped', 0)} "
+        f"failed={counts.get('failed', 0)}"
+    )
+    failed_results = [result for result in results if result.status == "failed"]
+    if failed_results:
+        print("failed sources:")
+        for result in failed_results:
+            print(
+                f"- model={result.model_name} dataset={result.dataset_name} "
+                f"source={result.source_path} error={result.error_type}: "
+                f"{result.error_message}"
+            )
 
 
 if __name__ == "__main__":

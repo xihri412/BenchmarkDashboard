@@ -69,6 +69,14 @@ data/<model>/<dataset_folder>/*.jsonl
 
 Flat files create one import source per JSONL. Nested folders create one import source per model + dataset folder; multiple JSONL files in that folder are treated as one dataset run and hashed together. If a successful run with the same source hash already exists, ingestion skips it.
 
+Data import is best-effort. Each model + dataset source is imported in its own
+transaction. If one source has malformed JSON, missing fields, adapter errors,
+or a database write failure, ingestion rolls back that source, logs a warning
+with the model, dataset, path, and exception, records a `failed` run when
+possible, and continues with the remaining sources. Failed runs do not
+participate in dashboard metrics, records search, or compare views. Fix the data
+or adapter and rerun ingestion to import that source.
+
 Run manually:
 
 ```bash
