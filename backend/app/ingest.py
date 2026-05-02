@@ -15,6 +15,11 @@ from app.adapters.registry import DatasetConfig, get_dataset_config, iter_datase
 from app.database import SessionLocal
 from app.models.benchmark import Dataset, EvaluationRun, MetricsSummary, Model, Record
 
+IGNORED_JSONL_FILENAMES = {
+    "shopping_mmlu_score_raw.jsonl",
+    "ifbench_score_old.jsonl",
+}
+
 
 @dataclass(frozen=True)
 class ImportResult:
@@ -34,6 +39,7 @@ class ImportSource:
     dataset_name: str
     source_path: Path
     files: tuple[Path, ...]
+    source_type: str = "jsonl"
 
 
 def ingest_data_dir(data_dir: Path, db: Session) -> list[ImportResult]:
@@ -106,6 +112,16 @@ def ingest_source(
             correct_count=existing_run.correct_count,
         )
 
+    if source.source_type == "summary_json":
+        return _ingest_summary_source(
+            db=db,
+            source=source,
+            source_path=source_path,
+            source_hash=source_hash,
+            model=model,
+            dataset=dataset,
+        )
+
     normalized_records = _load_normalized_records(source_files, dataset_config)
     total_count = len(normalized_records)
     correct_count = sum(1 for record in normalized_records if record.is_correct is True)
@@ -170,40 +186,62 @@ def _iter_import_sources(data_dir: Path) -> list[ImportSource]:
 
     sources: list[ImportSource] = []
     for path in sorted(data_dir.glob("*/*.jsonl")):
-        if not path.is_file():
+        if not _is_supported_jsonl(path):
             continue
-        dataset_name = path.stem
-        if get_dataset_config(dataset_name) is None:
+        dataset_config = get_dataset_config(path.stem)
+        if dataset_config is None:
             continue
         sources.append(
             ImportSource(
                 model_name=path.parent.name,
-                dataset_name=dataset_name,
+                dataset_name=dataset_config.name,
                 source_path=path,
                 files=(path,),
+                source_type="jsonl",
             )
         )
 
-    nested_files_by_folder: dict[Path, list[Path]] = {}
+    nested_files_by_source: dict[tuple[Path, str], list[Path]] = {}
     for path in sorted(data_dir.glob("*/*/*.jsonl")):
-        if not path.is_file():
+        if not _is_supported_jsonl(path):
             continue
-        dataset_name = path.parent.name
-        if get_dataset_config(dataset_name) is None:
+        dataset_config = get_dataset_config(path.parent.name) or get_dataset_config(path.stem)
+        if dataset_config is None:
             continue
-        nested_files_by_folder.setdefault(path.parent, []).append(path)
+        nested_files_by_source.setdefault((path.parent, dataset_config.name), []).append(path)
 
-    for folder, files in sorted(nested_files_by_folder.items()):
+    for (folder, dataset_name), files in sorted(nested_files_by_source.items()):
         sources.append(
             ImportSource(
                 model_name=folder.parent.name,
-                dataset_name=folder.name,
+                dataset_name=dataset_name,
                 source_path=folder,
                 files=tuple(sorted(files)),
+                source_type="jsonl",
+            )
+        )
+
+    for path in sorted(data_dir.glob("*/*/*.json")):
+        if not path.is_file():
+            continue
+        dataset_config = get_dataset_config(path.parent.name) or get_dataset_config(path.stem)
+        if dataset_config is None:
+            continue
+        sources.append(
+            ImportSource(
+                model_name=path.parent.parent.name,
+                dataset_name=dataset_config.name,
+                source_path=path,
+                files=(path,),
+                source_type="summary_json",
             )
         )
 
     return sources
+
+
+def _is_supported_jsonl(path: Path) -> bool:
+    return path.is_file() and path.name not in IGNORED_JSONL_FILENAMES
 
 
 def _get_or_create_model(db: Session, name: str) -> Model:
@@ -235,6 +273,142 @@ def _get_or_create_dataset(db: Session, dataset_config: DatasetConfig) -> Datase
     db.add(dataset)
     db.flush()
     return dataset
+
+
+def _ingest_summary_source(
+    *,
+    db: Session,
+    source: ImportSource,
+    source_path: Path,
+    source_hash: str,
+    model: Model,
+    dataset: Dataset,
+) -> ImportResult:
+    existing_run = db.scalar(
+        select(EvaluationRun).where(
+            EvaluationRun.model_id == model.id,
+            EvaluationRun.dataset_id == dataset.id,
+            EvaluationRun.source_hash == source_hash,
+            EvaluationRun.status == "completed",
+        )
+    )
+    if existing_run is not None:
+        return ImportResult(
+            model_name=model.name,
+            dataset_name=dataset.name,
+            source_path=source_path,
+            source_hash=source_hash,
+            status="skipped",
+            run_id=existing_run.id,
+            total_count=existing_run.total_count,
+            correct_count=existing_run.correct_count,
+        )
+
+    summary = _load_summary_json(source.files[0])
+    total_count = summary["total_count"]
+    correct_count = summary["correct_count"]
+    accuracy = summary["accuracy"]
+
+    run = EvaluationRun(
+        model_id=model.id,
+        dataset_id=dataset.id,
+        source_path=str(source_path),
+        source_hash=source_hash,
+        status="importing",
+        total_count=total_count,
+        correct_count=correct_count,
+    )
+    db.add(run)
+    db.flush()
+
+    db.add(
+        MetricsSummary(
+            run_id=run.id,
+            model_id=model.id,
+            dataset_id=dataset.id,
+            accuracy=accuracy,
+            avg_output_length=None,
+            avg_inference_time=None,
+            total_count=total_count,
+            correct_count=correct_count,
+        )
+    )
+    run.status = "completed"
+    db.commit()
+    db.refresh(run)
+
+    return ImportResult(
+        model_name=model.name,
+        dataset_name=dataset.name,
+        source_path=source_path,
+        source_hash=source_hash,
+        status="imported",
+        run_id=run.id,
+        total_count=total_count,
+        correct_count=correct_count,
+    )
+
+
+def _load_summary_json(source_path: Path) -> dict[str, int | float | None]:
+    with source_path.open("r", encoding="utf-8") as file:
+        raw_summary = json.load(file)
+    if not isinstance(raw_summary, dict):
+        raise ValueError(f"Expected summary object in {source_path}")
+
+    details = raw_summary.get("Details")
+    if not isinstance(details, dict):
+        details = {}
+
+    total_count = _optional_summary_int(details.get("total"))
+    correct_count = _optional_summary_int(details.get("correct"))
+    accuracy = _optional_summary_float(
+        raw_summary.get("Accuracy", raw_summary.get("Accuracy (%)"))
+    )
+
+    if total_count is None:
+        wrong_count = _optional_summary_int(details.get("wrong"))
+        if correct_count is not None and wrong_count is not None:
+            total_count = correct_count + wrong_count
+        else:
+            total_count = 0
+
+    if correct_count is None:
+        if accuracy is not None and total_count:
+            correct_count = round(_normalize_accuracy(accuracy) * total_count)
+        else:
+            correct_count = 0
+
+    normalized_accuracy = (
+        _normalize_accuracy(accuracy)
+        if accuracy is not None
+        else (correct_count / total_count)
+        if total_count
+        else None
+    )
+
+    return {
+        "total_count": total_count,
+        "correct_count": correct_count,
+        "accuracy": normalized_accuracy,
+    }
+
+
+def _optional_summary_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _optional_summary_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _normalize_accuracy(value: float) -> float:
+    if value > 1:
+        return value / 100
+    return value
 
 
 def _load_normalized_records(

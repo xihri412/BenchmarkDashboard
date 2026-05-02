@@ -263,9 +263,11 @@ metrics.
 
 ## 11. Field Fallback Rules
 
-- If `item_id` is missing, fallback candidates are `idx`, `index`, or line
-  number. This is risky because compare API relies on stable `item_id` alignment;
-  always prefer a dataset-provided stable ID.
+- For `item_id`, prefer a globally stable `uid` when present. If `uid` is not
+  available or is known to be unreliable, use a composite such as
+  `f"{pid}:{id}"`. Use plain `id`, `idx`, `index`, or line number only as a last
+  resort. This is risky because compare API relies on stable `item_id`
+  alignment, and local IDs can repeat across shards.
 - If `item_index` is missing, use `null`.
 - If `prompt` is missing, use `question` as a fallback when it represents the
   model input.
@@ -281,7 +283,36 @@ metrics.
 - If `inference_time` is missing, use `null`.
 - `original` must always store the full raw JSON row.
 
-## 12. AIME26 Adapter Example
+## 12. Additional Adapter Patterns
+
+Recent benchmark files use several naming conventions that adapters must keep
+distinct:
+
+- `raw_output`: usually the model's raw text response.
+- `raw_response`: used by BrowseComp-style files for the original response; map
+  this to normalized `raw_output`.
+- `response`: used by BrowseComp-ZH-style files; map this to normalized
+  `raw_output`.
+- `reasoning`: can be used as a `raw_output` fallback when the raw response is
+  absent.
+
+Correctness fields also vary:
+
+- `exact_match`: integer `0` or `1`; normalize with `exact_match == 1`.
+- `is_correct`: already boolean; preserve as boolean/null.
+- `score`: integer `0` or `1`; normalize with `score == 1`.
+
+For choice-like datasets such as BrowseComp, MMMLU-lite, MMLU-Pro, and
+MMLU-Redux, prefer this `item_id` order:
+
+1. `uid`
+2. `f"{pid}:{id}"`
+3. `id`
+
+Do not choose local `id` first when `uid` or `pid:id` is available, especially
+for datasets that may later be split into multiple JSONL shards.
+
+## 13. AIME26 Adapter Example
 
 Current `aime26.jsonl` mapping:
 
@@ -324,7 +355,92 @@ This snippet is intentionally small. The concrete adapter in the codebase may
 return a dataclass or model instead of a dict; use the current `base.py`
 contract.
 
-## 13. Verification
+## 14. Current Choice-Like Dataset Mappings
+
+### BrowseComp
+
+- Dataset key: `browsecomp`
+- Filename aliases: `browsecomp_score.jsonl`, `browsecomp.jsonl`
+- `item_id <- uid`, fallback `pid:id`, fallback `id`
+- `item_index <- id`
+- `prompt <- prompt`
+- `question <- question`
+- `target <- targets`
+- `output <- model_extracted_answer`, fallback `output`
+- `raw_output <- raw_response`, fallback `reasoning`, fallback `output`
+- `is_correct <- is_correct`
+- `output_length <- output_token_len`
+- `inference_time <- output_time`
+- `original <- raw full-line JSON`
+
+### BrowseComp-ZH
+
+- Dataset key: `browsecomp-zn`
+- Filename aliases: `browsecomp_zh_score.jsonl`, `browsecomp_zh.jsonl`,
+  `browsecomp-zh.jsonl`
+- `item_id <- uid`, fallback `pid:id`, fallback `id`
+- `item_index <- id`
+- `prompt <- prompt`
+- `question <- question`
+- `target <- targets`; this may be an object and should be stored as-is.
+- `output <- output`
+- `raw_output <- response`, fallback `output`
+- `is_correct <- score == 1`
+- `output_length <- output_token_len`
+- `inference_time <- output_time`
+- `original <- raw full-line JSON`
+
+### MMMLU-lite
+
+- Dataset key: `MMMLU-lite`
+- Filename aliases: `mmmlu_lite.jsonl`, `MMMLU-lite.jsonl`
+- `item_id <- uid`, fallback `pid:id`, fallback `id`
+- `item_index <- id`
+- `prompt <- prompt`
+- `question <- question`; keep multilingual text unchanged.
+- `target <- targets`
+- `output <- output`
+- `raw_output <- raw_output`, fallback `output`
+- `is_correct <- exact_match == 1`
+- `output_length <- output_token_len`
+- `inference_time <- output_time`
+- `original <- raw full-line JSON`
+
+### MMLU-Pro
+
+- Dataset key: `MMLU-Pro`
+- Filename aliases: `mmlu_pro.jsonl`, `MMLU-Pro.jsonl`
+- `item_id <- uid`, fallback `pid:id`, fallback `id`
+- `item_index <- id`
+- `prompt <- prompt`
+- `question <- question`
+- `target <- targets`
+- `output <- output`
+- `raw_output <- raw_output`, fallback `output`; preserve LaTeX as-is.
+- `is_correct <- exact_match == 1`
+- `output_length <- output_token_len`
+- `inference_time <- output_time`
+- `original <- raw full-line JSON`
+
+### MMLU-Redux
+
+- Dataset key: `MMLU-Redux`
+- Filename aliases: `mmlu.jsonl`, `MMLU-Redux.jsonl`
+- This project currently maps `mmlu.jsonl` to `MMLU-Redux` because the category
+  configuration already includes `MMLU-Redux`.
+- `item_id <- uid`, fallback `pid:id`, fallback `id`
+- `item_index <- id`
+- `prompt <- prompt`
+- `question <- question`
+- `target <- targets`
+- `output <- output`
+- `raw_output <- raw_output`, fallback `output`
+- `is_correct <- exact_match == 1`
+- `output_length <- output_token_len`
+- `inference_time <- output_time`
+- `original <- raw full-line JSON`
+
+## 15. Verification
 
 After adding or changing an adapter:
 
@@ -344,7 +460,7 @@ After adding or changing an adapter:
 7. Call the compare API and confirm two-model comparison aligns records by
    `item_id`.
 
-## 14. Common Mistakes
+## 16. Common Mistakes
 
 - Confusing dataset name with JSONL file name, especially using `results` as the
   dataset for nested `math500/results.jsonl`.

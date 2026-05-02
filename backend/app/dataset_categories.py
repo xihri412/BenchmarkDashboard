@@ -75,6 +75,7 @@ DATASET_CATEGORIES: tuple[DatasetCategory, ...] = (
         label="多语言",
         datasets=(
             dataset("MMMLU-lite"),
+            dataset("polymath"),
             dataset("global-piqa"),
             dataset("disco-x"),
         ),
@@ -123,8 +124,8 @@ DATASET_CATEGORIES: tuple[DatasetCategory, ...] = (
         key="search",
         label="搜索",
         datasets=(
-            dataset("browsecomp"),
-            dataset("browsecomp-zn"),
+            dataset("browsecomp", "BrowseComp"),
+            dataset("browsecomp-zn", "BrowseComp-ZH"),
             dataset("simpleqa"),
             dataset("c-simpleqa"),
         ),

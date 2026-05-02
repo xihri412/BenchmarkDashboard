@@ -26,6 +26,7 @@ frontend/.env.local
 
 # Benchmark source data stays local or on the deployment host.
 data/
+Evaluation_report/
 
 # Local database volumes
 postgres-data/

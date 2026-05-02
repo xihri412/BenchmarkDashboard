@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.adapters.registry import get_dataset_config
 from app.config import settings
 from app.database import get_db
-from app.ingest import ingest_data_dir
+from app.ingest import IGNORED_JSONL_FILENAMES, ingest_data_dir
 
 DataSnapshot = tuple[tuple[str, int, int], ...]
 
@@ -49,12 +49,34 @@ def _data_snapshot(data_dir: Path) -> DataSnapshot:
 
     rows: list[tuple[str, int, int]] = []
     for path in sorted(data_dir.glob("*/*.jsonl")):
-        if not path.is_file() or get_dataset_config(path.stem) is None:
+        if (
+            not path.is_file()
+            or path.name in IGNORED_JSONL_FILENAMES
+            or get_dataset_config(path.stem) is None
+        ):
             continue
         stat = path.stat()
         rows.append((str(path.relative_to(data_dir)), stat.st_mtime_ns, stat.st_size))
     for path in sorted(data_dir.glob("*/*/*.jsonl")):
-        if not path.is_file() or get_dataset_config(path.parent.name) is None:
+        if (
+            not path.is_file()
+            or path.name in IGNORED_JSONL_FILENAMES
+            or (
+                get_dataset_config(path.parent.name) is None
+                and get_dataset_config(path.stem) is None
+            )
+        ):
+            continue
+        stat = path.stat()
+        rows.append((str(path.relative_to(data_dir)), stat.st_mtime_ns, stat.st_size))
+    for path in sorted(data_dir.glob("*/*/*.json")):
+        if (
+            not path.is_file()
+            or (
+                get_dataset_config(path.parent.name) is None
+                and get_dataset_config(path.stem) is None
+            )
+        ):
             continue
         stat = path.stat()
         rows.append((str(path.relative_to(data_dir)), stat.st_mtime_ns, stat.st_size))

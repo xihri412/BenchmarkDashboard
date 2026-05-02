@@ -4,6 +4,7 @@ from typing import Any
 
 from app.adapters.base import NormalizedRecord
 from app.adapters.common import exact_match, optional_float, optional_int, optional_str
+from app.adapters.common_choice import item_index, stable_item_id
 
 
 class KorbenchAdapter:
@@ -11,8 +12,8 @@ class KorbenchAdapter:
 
     def normalize(self, row: dict[str, Any]) -> NormalizedRecord:
         return NormalizedRecord(
-            item_id=str(row.get("id", row.get("pid", row.get("uid")))),
-            item_index=optional_int(row.get("idx")),
+            item_id=stable_item_id(row),
+            item_index=item_index(row),
             prompt=optional_str(row.get("prompt") or row.get("question")),
             question=optional_str(row.get("question")),
             target=row.get("targets", row.get("target")),
